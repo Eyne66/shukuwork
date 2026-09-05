@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="校园书库排班与工时转账工作台 — 浏览器内独立完成，无需登录">
+  <title>书库工作台 · LibSchedPay</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📚%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="xlsx.full.min.js"></script>
+</head>
+<body>
+  <!-- Onboarding modal -->
+  <div class="modal-mask" id="onboarding" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>👋 第一次来？</h2>
+        <button class="modal-close" id="onboardingClose" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-lede">这个工作台只做两件事，看完就上手。</p>
+        <div class="onb-grid">
+          <div class="onb-item">
+            <div class="onb-num">1</div>
+            <div>
+              <h3>📅 排班</h3>
+              <p>填好班次 + 人员 + 硬约束 → 一键生成排班草稿 → 校核 → 导出 Excel</p>
+            </div>
+          </div>
+          <div class="onb-item">
+            <div class="onb-num">2</div>
+            <div>
+              <h3>💰 工时</h3>
+              <p>分两步：① 录入实际工时 ② 一键填入官方下发工时 → 配平 → 导出最终转账表</p>
+            </div>
+          </div>
+          <div class="onb-item">
+            <div class="onb-num">3</div>
+            <div>
+              <h3>✨ 关于</h3>
+              <p>想了解"为什么这样做"和算法说明，可以看这里。</p>
+            </div>
+          </div>
+        </div>
+        <p class="modal-tip">💡 所有计算都在你手机本地完成，不上传任何数据。</p>
+      </div>
+      <div class="modal-foot">
+        <label class="modal-check"><input type="checkbox" id="onboardingNever"> 不再提示</label>
+        <button class="btn btn-primary" id="onboardingStart">开始使用</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">📚</div>
+        <div>
+          <div class="brand-name">书库工作台</div>
+          <div class="brand-sub">LibSchedPay</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-tab="schedule">
+          <span class="nav-icon">📅</span>
+          <span>排班</span>
+        </button>
+        <button class="nav-item" data-tab="settlement">
+          <span class="nav-icon">💰</span>
+          <span>工时</span>
+        </button>
+        <button class="nav-item" data-tab="about">
+          <span class="nav-icon">✨</span>
+          <span>关于</span>
+        </button>
+      </nav>
+      <button class="nav-help" id="showOnboarding">❓ 新手引导</button>
+      <div class="sidebar-foot">
+        <div class="dot"></div>
+        <span>本地计算 · 零上传</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ========== 排班 ========== -->
+      <section class="panel active" id="panel-schedule">
+        <header class="page-head">
+          <div class="eyebrow">排班 / Schedule</div>
+          <h1>把这一周排满</h1>
+          <p>填好班次和人员，生成草稿后再人工校核。所有计算都在本地完成。</p>
+        </header>
+
+        <!-- Step indicator -->
+        <div class="stepper" id="schedStepper">
+          <span class="step active" data-step="1">① 周期与班次</span>
+          <span class="step" data-step="2">② 人员与硬约束</span>
+          <span class="step" data-step="3">③ 生成与导出</span>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>① 周期与班次</h3>
+            <button class="link-btn" data-collapse="sched1">收起 ▴</button>
+          </div>
+          <div class="card-body" id="sched1">
+            <div class="grid-2">
+              <label class="field">
+                <span>开始日期</span>
+                <input type="date" id="schedStart" value="2026-09-07">
+              </label>
+              <label class="field">
+                <span>结束日期</span>
+                <input type="date" id="schedEnd" value="2026-09-13">
+              </label>
+            </div>
+            <label class="field">
+              <span>班次（每行：班次名 开始-结束 人数）</span>
+              <textarea id="schedShifts" rows="3">早班 09:00-11:00 5
+下午班 14:00-16:00 5
+晚班 19:00-22:00 5</textarea>
+            </label>
+            <div class="hint-text">
+              <span class="dot-mini"></span>
+              <span>分配口径：按班岗时长分别平均（2 小时班、3 小时班分开平衡人数）</span>
+            </div>
+
+            <!-- 实时预览 -->
+            <div class="realtime-bar" id="schedRealtime">
+              <div class="rt-item">
+                <span class="rt-label">日期</span>
+                <strong id="rtDays">7 天</strong>
+              </div>
+              <div class="rt-item">
+                <span class="rt-label">计划岗位</span>
+                <strong id="rtSlots">—</strong>
+              </div>
+              <div class="rt-item">
+                <span class="rt-label">计划工时</span>
+                <strong id="rtHours">—</strong>
+              </div>
+            </div>
+
+            <div class="chips">
+              <button class="chip" data-scenario="35">35 人示例</button>
+              <button class="chip" data-scenario="10">10 人示例</button>
+              <button class="chip" data-scenario="constraint">含硬约束</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>② 人员与硬约束</h3>
+            <button class="link-btn" data-collapse="sched2">收起 ▴</button>
+          </div>
+          <div class="card-body" id="sched2">
+            <div class="upload-row">
+              <span class="upload-label">📥 也可以：上传名单自动识别（<b>.xlsx / .csv / .json</b>）</span>
+              <input type="file" id="schedPeopleUpload" accept=".xlsx,.csv,.json" hidden>
+              <button class="btn btn-ghost" id="schedPeopleUploadBtn">选择文件</button>
+              <span class="upload-hint" id="schedPeopleUploadHint"></span>
+            </div>
+
+            <label class="field">
+              <span>人员名单（每行一个）</span>
+              <textarea id="schedPeople" rows="6"></textarea>
+            </label>
+            <div class="realtime-bar">
+              <div class="rt-item">
+                <span class="rt-label">人员</span>
+                <strong id="rtPeople">0 人</strong>
+              </div>
+              <div class="rt-item">
+                <span class="rt-label">每人平均工时</span>
+                <strong id="rtAvgHours">—</strong>
+              </div>
+              <div class="rt-item">
+                <span class="rt-label">平均每个 2h 班</span>
+                <strong id="rtAvg2h">—</strong>
+              </div>
+              <div class="rt-item">
+                <span class="rt-label">平均每个 3h 班</span>
+                <strong id="rtAvg3h">—</strong>
+              </div>
+            </div>
+
+            <details class="reveal">
+              <summary>
+                <span>硬约束（勾选 = 该人员在该日该班次绝对不能排）</span>
+                <span class="caret">▾</span>
+              </summary>
+              <div id="schedConstraintGrid" class="constraint-grid"></div>
+            </details>
+
+            <div class="actions">
+              <button class="btn btn-ghost" id="schedBack1">← 上一步</button>
+              <button class="btn btn-primary btn-lg" id="schedGenerate">⚡ 生成排班草稿</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="sched3Card">
+          <div class="card-head">
+            <h3>③ 生成与导出</h3>
+          </div>
+          <div class="card-body" id="sched3">
+            <div class="actions">
+              <button class="btn btn-ghost" id="schedValidate">↻ 重新校验</button>
+              <button class="btn btn-success" id="schedExport" disabled>⬇ 下载 Excel</button>
+            </div>
+            <div id="schedSummary" class="stat-grid hidden"></div>
+            <div id="schedWarnings" class="alert alert-warn hidden"></div>
+            <div id="schedErrors" class="alert alert-err hidden"></div>
+            <div id="schedTableWrap" class="result-wrap hidden"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 工时 ========== -->
+      <section class="panel" id="panel-settlement">
+        <header class="page-head">
+          <div class="eyebrow">工时 / Settlement</div>
+          <h1>把实际工时与下发工时配平</h1>
+          <p>分两步：先录实际工时，再逐人确认官方下发工时，最后配平导出。</p>
+        </header>
+
+        <div class="stepper">
+          <span class="step active">① 实际工时</span>
+          <span class="step">② 官方下发工时</span>
+          <span class="step">③ 配平与导出</span>
+        </div>
+
+        <!-- ====== 模块 A: 实际工时 ====== -->
+        <div class="card">
+          <div class="card-head">
+            <h3>模块 A · 实际工时</h3>
+            <span class="meta" id="stlCount">0 人</span>
+          </div>
+          <div class="card-body">
+            <div class="grid-3">
+              <label class="field">
+                <span>开始日期</span>
+                <input type="date" id="stlStart" value="2026-09-01">
+              </label>
+              <label class="field">
+                <span>结束日期</span>
+                <input type="date" id="stlEnd" value="2026-09-30">
+              </label>
+              <label class="field">
+                <span>官方下发工时上限</span>
+                <input type="number" id="stlCap" min="0" step="0.5" value="33">
+              </label>
+            </div>
+
+            <div class="upload-row">
+              <span class="upload-label">📥 也可以：上传签到表自动识别（<b>.xlsx / .csv / .json</b>）</span>
+              <input type="file" id="stlUpload" accept=".xlsx,.csv,.json" hidden>
+              <button class="btn btn-ghost" id="stlUploadBtn">选择文件</button>
+              <span class="upload-hint" id="stlUploadHint"></span>
+            </div>
+
+            <div class="table-scroll">
+              <table class="t editable mobile-tight" id="stlTable">
+                <thead>
+                  <tr>
+                    <th class="col-num" style="width:2.4em">#</th>
+                    <th class="col-name">姓名</th>
+                    <th class="num col-actual">实际工时（整数）</th>
+                    <th class="col-status"></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <div class="actions">
+              <button class="btn btn-ghost" id="stlAdd">+ 添加一行</button>
+              <button class="btn btn-ghost" id="stlBulkPaste">批量粘贴工时</button>
+            </div>
+
+            <div class="realtime-bar">
+              <div class="rt-item">
+                <span class="rt-label">实际总工时</span>
+                <strong id="stlActualTotal">—</strong>
+              </div>
+              <div class="rt-item">
+                <span class="rt-label">人数</span>
+                <strong id="stlPersonCount">0</strong>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button class="btn btn-primary btn-lg" id="stlGoToB">下一步：填入官方下发 →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ====== 模块 B: 官方下发 + 配平 ====== -->
+        <div class="card">
+          <div class="card-head">
+            <h3>模块 B · 官方下发工时 + 配平</h3>
+            <span class="meta" id="stlBCount">0 人</span>
+          </div>
+          <div class="card-body">
+            <div class="cap-row">
+              <label class="field inline">
+                <span>官方下发工时上限（可编辑）</span>
+                <input type="number" id="stlCapB" min="0" step="0.5" value="33">
+              </label>
+              <span class="cap-hint">↑ 与模块 A 共用同一时段</span>
+            </div>
+
+            <div class="quick-actions">
+              <button class="btn btn-primary" id="stlFillCap">⚡ 一键填入上限（每人 = <span id="stlCapLabel">33</span>）</button>
+              <button class="btn btn-ghost" id="stlFillActual">按实际工时填入（不超过上限）</button>
+              <button class="btn btn-ghost" id="stlClearIssued">清空下发工时</button>
+            </div>
+
+            <div class="table-scroll">
+              <table class="t editable mobile-tight" id="stlTableB">
+                <thead>
+                  <tr>
+                    <th class="col-num" style="width:2.4em">#</th>
+                    <th class="col-name">姓名</th>
+                    <th class="num col-actual">实际</th>
+                    <th class="num col-issued">官方下发</th>
+                    <th class="num col-diff">差值</th>
+                    <th class="col-status">状态</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <div id="stlResult" class="stat-grid hidden"></div>
+            <div id="stlTransferErrors" class="alert alert-err hidden"></div>
+
+            <label class="field">
+              <span>转账表（每行：付款人 | 收款人 | 工时）</span>
+              <textarea id="stlTransfers" rows="5" placeholder="例如：&#10;小李 | 小张 | 7&#10;小王 | 小赵 | 5"></textarea>
+            </label>
+
+            <div class="actions">
+              <button class="btn btn-ghost" id="stlValidateTransfers">✓ 校验配平</button>
+              <button class="btn btn-ghost" id="stlExportDraft">导出核算草案</button>
+              <button class="btn btn-ghost" id="stlExportPublic">导出公示表</button>
+              <button class="btn btn-ghost" id="stlExportSummary">导出实际工时一览</button>
+              <button class="btn btn-success" id="stlExportFinal" disabled>⬇ 导出最终转账 Excel</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 关于 ========== -->
+      <section class="panel" id="panel-about">
+        <header class="page-head">
+          <div class="eyebrow">关于 / About</div>
+          <h1>LibSchedPay</h1>
+          <p>基于 <a href="https://github.com/Eyne66/LibSchedPay" target="_blank" rel="noopener">github.com/Eyne66/LibSchedPay</a>，由 MiniMax Agent 制作部署。</p>
+        </header>
+
+        <div class="card">
+          <h3>这是一个什么工具</h3>
+          <p>校园书库学生助理排班 + 工时转账的本地工作台。负责人填数据 → 脚本算 → 表格预览改 → 校验 → 导出 Excel。</p>
+
+          <h3>能力</h3>
+          <ul class="list">
+            <li><b>排班</b>：周期、班次、硬约束、30–40 人名单；按班岗时长分别平衡；导出 Excel</li>
+            <li><b>工时转账</b>：实际工时、官方下发工时逐人编辑；差值自动算；配平 + 校验；转账表 + 公示表 + 一览表 + 草案</li>
+            <li><b>校验</b>：硬约束违反、缺岗、超员、未配平全部报错，不让伪成品导出</li>
+          </ul>
+
+          <h3>不做什么</h3>
+          <ul class="list">
+            <li>不替你做软偏好（"尽量和某人一起""优先晚班"——草稿里人工调）</li>
+            <li>不计算时薪、人民币金额、税费或银行付款</li>
+            <li>不替你猜未填的下发工时，必须人确认</li>
+            <li>不上传任何数据到服务器，所有计算在浏览器本地完成</li>
+          </ul>
+
+          <h3>资源</h3>
+          <ul class="list">
+            <li><a href="https://github.com/Eyne66/LibSchedPay" target="_blank" rel="noopener">GitHub 仓库</a> — Python 原版代码 + 完整说明</li>
+            <li><a href="https://github.com/Eyne66/LibSchedPay/blob/main/README.md" target="_blank" rel="noopener">README</a> — 快速开始 / API / 已知限制</li>
+            <li><a href="https://github.com/Eyne66/LibSchedPay/blob/main/%E4%B8%9A%E5%8A%A1%E9%9C%80%E6%B1%82%E4%B8%8E%E5%86%B3%E7%AD%96%E8%AE%B0%E5%BD%95.md" target="_blank" rel="noopener">业务需求与决策记录</a> — 为什么这样设计</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="schedule.js"></script>
+  <script src="settlement.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
